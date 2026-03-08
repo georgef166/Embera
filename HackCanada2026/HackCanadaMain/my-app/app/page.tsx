@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { FireSightView } from "@/components/firesight-view";
+import { WatchTelemetryOverlay } from "@/components/watch-telemetry-overlay";
 import { startFireSightPublisherUi, ViewMode } from "@/lib/firesight-publisher-ui";
+import { useTelemetry } from "@/lib/use-telemetry";
 import {
   PEER_CONFIGURATION,
   type ViewerProfile,
@@ -196,6 +198,10 @@ export default function Home() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [modelStatus, setModelStatus] = useState(DEFAULT_MODEL_STATUS);
   const [systemStatus, setSystemStatus] = useState(DEFAULT_SYSTEM_STATUS);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+
+  // Link HUD to the simulated backend watch session instead of the WebRTC dynamic Session ID
+  const telemetry = useTelemetry("demo-session");
   const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.CONTOUR);
   const setViewModeRef = useRef<(mode: ViewMode) => void>(() => { });
 
@@ -219,7 +225,7 @@ export default function Home() {
     let cameraStream: MediaStream | null = null;
     let microphoneStream: MediaStream | null = null;
     let peerConnection: RTCPeerConnection | null = null;
-    let currentSessionId: string | null = null;
+    let currentSessionIdLocal: string | null = null; // Renamed to avoid conflict with state
     let isDisposed = false;
     let isNegotiating = false;
     let lastMessageId = 0;
@@ -231,7 +237,8 @@ export default function Home() {
     const closePeerConnection = () => {
       peerConnection?.close();
       peerConnection = null;
-      currentSessionId = null;
+      currentSessionIdLocal = null;
+      setCurrentSessionId(null); // Clear state on close
     };
 
     const updatePresence = async () => {
@@ -263,7 +270,8 @@ export default function Home() {
       const nextSessionId = crypto.randomUUID();
 
       peerConnection = nextPeerConnection;
-      currentSessionId = nextSessionId;
+      currentSessionIdLocal = nextSessionId;
+      setCurrentSessionId(nextSessionId); // Update state
 
       try {
         const viewerPreferences = currentViewerPreferences;
@@ -346,7 +354,7 @@ export default function Home() {
           }
 
           if (
-            message.sessionId !== currentSessionId ||
+            message.sessionId !== currentSessionIdLocal || // Use local variable
             !peerConnection ||
             peerConnection.remoteDescription
           ) {
@@ -461,13 +469,16 @@ export default function Home() {
   }, []);
 
   return (
-    <FireSightView
-      canvasRef={canvasRef}
-      modelStatus={modelStatus}
-      systemStatus={systemStatus}
-      videoRef={videoRef}
-      currentViewMode={viewMode}
-      onViewModeChange={setViewMode}
-    />
+    <main className="relative h-svh w-full overflow-hidden bg-black text-white">
+      <FireSightView
+        canvasRef={canvasRef}
+        modelStatus={modelStatus}
+        systemStatus={systemStatus}
+        videoRef={videoRef}
+        currentViewMode={viewMode}
+        onViewModeChange={setViewMode}
+      />
+      <WatchTelemetryOverlay telemetry={telemetry} />
+    </main>
   );
 }

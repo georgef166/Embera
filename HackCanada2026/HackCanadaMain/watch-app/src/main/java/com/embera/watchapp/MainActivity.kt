@@ -244,6 +244,9 @@ fun WearApp(onToggleService: (Boolean) -> Unit) {
                 fontFamily = FontFamily.Monospace,
                 fontSize = 14.sp
             )
+            // TODO: Replace with the actual IP address of the machine running the server
+            val serverIp = "10.190.147.86"
+            val serverUrl = "ws://$serverIp:8000/api/sessions/demo-session/stream"
             // Display Heading degrees in small text
             Text(
                 text = "HDG: ${if (isRunning) (continuousHeading % 360f).let { if (it < 0) it + 360 else it }.toInt().toString() else "--"}°",
