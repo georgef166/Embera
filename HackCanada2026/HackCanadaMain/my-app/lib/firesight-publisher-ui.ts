@@ -54,10 +54,10 @@ type VideoFrameCapableElement = HTMLVideoElement & {
 
 const DETECTION_CLASSES = new Set(["person", "stop sign"]);
 const DETECTION_ENABLED_BY_DEFAULT = true;
-const ANALYSIS_DIMENSION_STEPS = [384, 320, 256];
+const ANALYSIS_DIMENSION_STEPS = [2560, 1920, 1080, 768];
 const DETECTION_FPS_STEPS = [3, 2, 1];
-const EDGE_ANALYSIS_SCALE = 0.5;
 const EDGE_FPS_STEPS = [60, 30, 15, 5];
+const EDGE_ANALYSIS_SCALE = 1.0;
 const LOW_FPS_THRESHOLD = 28;
 const PERFORMANCE_WINDOW_MS = 1_500;
 
@@ -659,7 +659,7 @@ export async function startFireSightPublisherUi({
       const alpha = src[i + 3];
 
       const luminance = r * 0.299 + g * 0.587 + b * 0.114;
-      const normalizedLum = luminance / 255;
+      const normalizedLum = 1.0 - (luminance / 255);
 
       let outR = 0, outG = 0, outB = 0;
 
@@ -695,7 +695,7 @@ export async function startFireSightPublisherUi({
     }
 
     const previousSmoothing = context.imageSmoothingEnabled;
-    context.imageSmoothingEnabled = false;
+    context.imageSmoothingEnabled = true; // Enable smoothing for better quality
     context.drawImage(
       thermalCanvas,
       displayRect.x,
