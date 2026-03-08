@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { FireSightView } from "@/components/firesight-view";
 import { WatchTelemetryOverlay } from "@/components/watch-telemetry-overlay";
+import { CompassWidget } from "@/components/compass-widget";
 import { startFireSightPublisherUi, ViewMode } from "@/lib/firesight-publisher-ui";
 import { useTelemetry } from "@/lib/use-telemetry";
 import {
@@ -479,6 +480,7 @@ export default function Home() {
         onViewModeChange={setViewMode}
       />
       <WatchTelemetryOverlay telemetry={telemetry} />
+      <CompassWidget telemetry={telemetry} />
     </main>
   );
 }

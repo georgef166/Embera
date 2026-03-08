@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ObjectDetectionOverlay } from "@/components/object-detection-overlay";
 import { WatchTelemetryOverlay } from "@/components/watch-telemetry-overlay";
+import { CompassWidget } from "@/components/compass-widget";
 import type { CocoPrediction } from "@/lib/coco-detections";
 import { mapPredictionsToDetections } from "@/lib/coco-detections";
 import { useTelemetry } from "@/lib/use-telemetry";
@@ -611,7 +612,10 @@ export default function AdminPage() {
       ) : null}
 
       {hasStream ? (
-        <WatchTelemetryOverlay telemetry={telemetry} />
+        <>
+          <WatchTelemetryOverlay telemetry={telemetry} />
+          <CompassWidget telemetry={telemetry} />
+        </>
       ) : null}
 
       <div className="absolute inset-x-0 top-0 z-50 space-y-3 px-4 py-3">
