@@ -29,3 +29,14 @@ yarn-error.log*
 *.swp
 .idea/
 .vscode/
+
+# Android / Gradle
+watch-app/.gradle/
+watch-app/build/
+watch-app/captures/
+watch-app/*.apk
+watch-app/*.aar
+watch-app/*.jks
+watch-app/gradle-app.setting
+watch-app/local.properties
+watch-app/.navigation/

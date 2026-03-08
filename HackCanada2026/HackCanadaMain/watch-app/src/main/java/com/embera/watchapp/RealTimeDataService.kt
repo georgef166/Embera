@@ -347,11 +347,11 @@ class   RealTimeDataService : Service(), SensorEventListener {
             magnetometerReading
         )) {
             // Remap coordinate system for vertical "looking at watch" orientation
-            // We map Device X -> World X and Device Y -> World Z (up)
+            // "Just flip the axis" - trying Y as the new X axis
             SensorManager.remapCoordinateSystem(
                 rotationMatrix,
-                SensorManager.AXIS_X,
-                SensorManager.AXIS_Z,
+                SensorManager.AXIS_Y,
+                SensorManager.AXIS_MINUS_X,
                 adjustedRotationMatrix
             )
 
