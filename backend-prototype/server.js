@@ -36,7 +36,7 @@ wss.on('connection', function connection(ws, req) {
             // Log the incoming data clearly to the terminal
             console.log('\n=======================================');
             console.log(`[JSON] HR: ${biometricData.heartRate} | SpO2: ${biometricData.oxygenSaturation.toFixed(1)}%`);
-            console.log(`[JSON] GPS: ${biometricData.latitude.toFixed(5)}, ${biometricData.longitude.toFixed(5)}`);
+            console.log(`[JSON] GPS: ${biometricData.latitude.toFixed(5)}, ${biometricData.longitude.toFixed(5)} | HDG: ${biometricData.heading.toFixed(1)}°`);
             console.log('=======================================\n');
             // console.log('\n--- Incoming Telemetry ---');
             // console.log(`HR:   ${biometricData.heartRate} bpm`);

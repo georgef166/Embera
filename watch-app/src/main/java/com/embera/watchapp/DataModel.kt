@@ -9,5 +9,6 @@ data class BiometricData(
     val skinTemperature: Double,
     val latitude: Double,
     val longitude: Double,
+    val heading: Double,
     val isManDown: Boolean
 )

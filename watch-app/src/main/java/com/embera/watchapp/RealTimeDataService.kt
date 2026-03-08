@@ -33,8 +33,12 @@ import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 
-class   RealTimeDataService : Service() {
+class   RealTimeDataService : Service(), SensorEventListener {
 
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(Dispatchers.Default + serviceJob)
@@ -43,6 +47,7 @@ class   RealTimeDataService : Service() {
     private lateinit var powerManager: PowerManager
     private var wakeLock: PowerManager.WakeLock? = null
     private lateinit var broadcastManager: LocalBroadcastManager
+    private lateinit var sensorManager: SensorManager
 
     // Biometric data values
     private var heartRate: Double = 0.0
@@ -50,6 +55,14 @@ class   RealTimeDataService : Service() {
     private var skinTemperature: Double = 36.5 // Starting simulated value
     private var currentLat: Double = 0.0
     private var currentLng: Double = 0.0
+    private var currentHeading: Double = 0.0
+
+    // Sensor buffers
+    private val accelerometerReading = FloatArray(3)
+    private val magnetometerReading = FloatArray(3)
+    private val rotationMatrix = FloatArray(9)
+    private val adjustedRotationMatrix = FloatArray(9)
+    private val orientationAngles = FloatArray(3)
 
     // Streaming clients
     private lateinit var webSocketClient: WebSocketClient
@@ -69,6 +82,7 @@ class   RealTimeDataService : Service() {
         powerManager = getSystemService(POWER_SERVICE) as PowerManager
         broadcastManager = LocalBroadcastManager.getInstance(this)
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
         webSocketClient = WebSocketClient(serviceScope)
     }
 
@@ -85,6 +99,7 @@ class   RealTimeDataService : Service() {
 
         startDataCollection()
         startLocationTracking()
+        startCompassTracking()
         startAudioStreaming()
         
         isServiceRunning = true
@@ -96,6 +111,7 @@ class   RealTimeDataService : Service() {
         isServiceRunning = false
         stopDataCollection()
         stopAudioStreaming()
+        stopCompassTracking()
         fusedLocationClient.removeLocationUpdates(locationCallback)
         webSocketClient.disconnect()
         releaseWakeLock()
@@ -183,6 +199,7 @@ class   RealTimeDataService : Service() {
             putExtra(EXTRA_HEART_RATE, heartRate)
             putExtra(EXTRA_SPO2, oxygenSaturation)
             putExtra(EXTRA_SKIN_TEMP, skinTemperature)
+            putExtra(EXTRA_HEADING, currentHeading)
         }
         broadcastManager.sendBroadcast(intent)
         
@@ -193,6 +210,7 @@ class   RealTimeDataService : Service() {
             skinTemperature = skinTemperature,
             latitude = currentLat,
             longitude = currentLng,
+            heading = currentHeading,
             isManDown = false
         )
         webSocketClient.sendBiometricData(payload)
@@ -284,11 +302,80 @@ class   RealTimeDataService : Service() {
         audioRecord = null
     }
 
+    private fun startCompassTracking() {
+        sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.also { accelerometer ->
+            sensorManager.registerListener(
+                this,
+                accelerometer,
+                SensorManager.SENSOR_DELAY_NORMAL,
+                SensorManager.SENSOR_DELAY_UI
+            )
+        }
+        sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)?.also { magneticField ->
+            sensorManager.registerListener(
+                this,
+                magneticField,
+                SensorManager.SENSOR_DELAY_NORMAL,
+                SensorManager.SENSOR_DELAY_UI
+            )
+        }
+    }
+
+    private fun stopCompassTracking() {
+        sensorManager.unregisterListener(this)
+    }
+
+    override fun onSensorChanged(event: SensorEvent) {
+        if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
+            System.arraycopy(event.values, 0, accelerometerReading, 0, accelerometerReading.size)
+        } else if (event.sensor.type == Sensor.TYPE_MAGNETIC_FIELD) {
+            System.arraycopy(event.values, 0, magnetometerReading, 0, magnetometerReading.size)
+        }
+
+        updateOrientationAngles()
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
+        // Not needed
+    }
+
+    private fun updateOrientationAngles() {
+        if (SensorManager.getRotationMatrix(
+            rotationMatrix,
+            null,
+            accelerometerReading,
+            magnetometerReading
+        )) {
+            // Remap coordinate system for vertical "looking at watch" orientation
+            // We map Device X -> World X and Device Y -> World Z (up)
+            SensorManager.remapCoordinateSystem(
+                rotationMatrix,
+                SensorManager.AXIS_X,
+                SensorManager.AXIS_Z,
+                adjustedRotationMatrix
+            )
+
+            SensorManager.getOrientation(adjustedRotationMatrix, orientationAngles)
+            
+            // Azimuth is orientationAngles[0] in radians. Convert to degrees.
+            val azimuthRadians = orientationAngles[0]
+            var azimuthDegrees = Math.toDegrees(azimuthRadians.toDouble())
+            
+            // Normalize to North = 0, clock-wise 0-360
+            if (azimuthDegrees < 0) {
+                azimuthDegrees += 360.0
+            }
+            
+            currentHeading = azimuthDegrees
+        }
+    }
+
     companion object {
         var isServiceRunning = false
         const val ACTION_BIOMETRIC_DATA = "com.embera.watchapp.ACTION_BIOMETRIC_DATA"
         const val EXTRA_HEART_RATE = "com.embera.watchapp.EXTRA_HEART_RATE"
         const val EXTRA_SPO2 = "com.embera.watchapp.EXTRA_SPO2"
         const val EXTRA_SKIN_TEMP = "com.embera.watchapp.EXTRA_SKIN_TEMP"
+        const val EXTRA_HEADING = "com.embera.watchapp.EXTRA_HEADING"
     }
 }
