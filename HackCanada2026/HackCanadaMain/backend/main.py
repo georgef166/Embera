@@ -7,9 +7,13 @@ from random import Random
 from typing import Literal
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+import json
+import logging
+
+logger = logging.getLogger("uvicorn.error")
 
 
 class Detection(BaseModel):
@@ -729,3 +733,44 @@ def get_anchor_guidance(
     anchor = get_anchor_or_404(anchor_id)
     guidance = build_anchor_guidance(anchor, payload.currentPose)
     return deepcopy(guidance)
+
+
+# --- Watch Telemetry Ingestion API ---
+
+@app.websocket("/api/sessions/{session_id}/stream")
+async def websocket_stream(websocket: WebSocket, session_id: str):
+    await websocket.accept()
+    logger.info(f"Watch telemetry client connected to session: {session_id}")
+    try:
+        while True:
+            # We receive both text (JSON) and bytes (Audio) from the watch
+            message = await websocket.receive()
+            if "text" in message:
+                try:
+                    payload = json.loads(message["text"])
+                    logger.info(f"Received raw telemetry: {payload}")
+                    if session_id in session_store:
+                        snapshot = session_store[session_id]
+                        timestamp = utc_now_iso()
+                        
+                        # Apply live biometrics from watch
+                        snapshot.biometrics.heartRate = payload.get("heartRate", snapshot.biometrics.heartRate)
+                        snapshot.biometrics.oxygen = payload.get("oxygenSaturation", snapshot.biometrics.oxygen)
+                        snapshot.biometrics.skinTempC = round(payload.get("skinTemperature", snapshot.biometrics.skinTempC), 1)
+                        snapshot.biometrics.lastUpdated = timestamp
+                        
+                        # Apply live compass heading
+                        heading = payload.get("heading")
+                        if heading is not None:
+                            snapshot.guidance.headingDegrees = int(round(heading)) % 360
+                            
+                except Exception as e:
+                    logger.error(f"Failed to parse telemetry JSON: {e}")
+            elif "bytes" in message:
+                # Discard audio binary frames for now to prevent flooding the backend processing
+                pass
+
+    except WebSocketDisconnect:
+        logger.info("Watch telemetry client disconnected.")
+    except Exception as e:
+        logger.error(f"WebSocket stream error: {e}")

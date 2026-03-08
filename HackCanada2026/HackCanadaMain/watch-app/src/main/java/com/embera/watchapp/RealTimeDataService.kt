@@ -95,7 +95,7 @@ class   RealTimeDataService : Service(), SensorEventListener {
         acquireWakeLock()
         
         // Connect to prototype backend
-        webSocketClient.connect("ws://10.190.147.86:8080/stream")
+        webSocketClient.connect("ws://10.190.147.86:8000/api/sessions/demo-session/stream")
 
         startDataCollection()
         startLocationTracking()

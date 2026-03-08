@@ -2,8 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ObjectDetectionOverlay } from "@/components/object-detection-overlay";
+import { WatchTelemetryOverlay } from "@/components/watch-telemetry-overlay";
 import type { CocoPrediction } from "@/lib/coco-detections";
 import { mapPredictionsToDetections } from "@/lib/coco-detections";
+import { useTelemetry } from "@/lib/use-telemetry";
 import type { Detection } from "@/lib/types";
 import {
   type CameraSummary,
@@ -65,10 +67,10 @@ export default function AdminPage() {
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const detectionModelRef = useRef<DetectionModel | null>(null);
   const cameraNameMapRef = useRef<Record<string, string>>({});
-  const closePeerConnectionRef = useRef<() => void>(() => {});
+  const closePeerConnectionRef = useRef<() => void>(() => { });
   const requestCameraRef = useRef<
     (clientId: string, force?: boolean) => Promise<void>
-  >(async () => {});
+  >(async () => { });
   const selectedClientIdRef = useRef<string | null>(null);
   const selectionHydratedRef = useRef(false);
   const lastCameraRequestRef = useRef<PendingCameraRequest | null>(null);
@@ -82,6 +84,10 @@ export default function AdminPage() {
   const [status, setStatus] = useState("Waiting for cameras to connect...");
   const [audioStatus, setAudioStatus] = useState(DEFAULT_AUDIO_STATUS);
   const [mlStatus, setMlStatus] = useState(DEFAULT_ML_STATUS);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+
+  // Link HUD to the simulated backend watch session instead of the WebRTC dynamic Session ID
+  const telemetry = useTelemetry("demo-session");
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -150,6 +156,7 @@ export default function AdminPage() {
       peerConnectionRef.current?.close();
       peerConnectionRef.current = null;
       activeSessionIdRef.current = null;
+      setCurrentSessionId(null);
 
       if (videoRef.current) {
         videoRef.current.srcObject = null;
@@ -207,6 +214,7 @@ export default function AdminPage() {
 
       closePeerConnection();
       activeSessionIdRef.current = sessionId;
+      setCurrentSessionId(sessionId);
       setAudioEnabled(false);
       setAudioStatus(DEFAULT_AUDIO_STATUS);
       setDetections([]);
@@ -411,8 +419,8 @@ export default function AdminPage() {
       window.clearTimeout(offerPollTimeoutId);
       window.clearTimeout(reconnectTimeoutId);
       closePeerConnection();
-      requestCameraRef.current = async () => {};
-      closePeerConnectionRef.current = () => {};
+      requestCameraRef.current = async () => { };
+      closePeerConnectionRef.current = () => { };
     };
   }, []);
 
@@ -601,7 +609,12 @@ export default function AdminPage() {
       {mlEnabled && detections.length > 0 ? (
         <ObjectDetectionOverlay detections={detections} />
       ) : null}
-      <div className="absolute inset-x-0 top-0 z-20 space-y-3 px-4 py-3">
+
+      {hasStream ? (
+        <WatchTelemetryOverlay telemetry={telemetry} />
+      ) : null}
+
+      <div className="absolute inset-x-0 top-0 z-50 space-y-3 px-4 py-3">
         <div className="flex items-start justify-between gap-3">
           <div className="rounded-2xl bg-black/65 px-4 py-3 backdrop-blur">
             <p className="text-sm text-white/85">{status}</p>
@@ -639,11 +652,10 @@ export default function AdminPage() {
                       key={camera.clientId}
                       type="button"
                       onClick={() => handleSelectCamera(camera)}
-                      className={`min-w-52 rounded-2xl border px-4 py-3 text-left transition ${
-                        isSelected
-                          ? "border-cyan-300 bg-cyan-500/15 text-white"
-                          : "border-white/10 bg-white/5 text-white/80"
-                      }`}
+                      className={`min-w-52 rounded-2xl border px-4 py-3 text-left transition ${isSelected
+                        ? "border-cyan-300 bg-cyan-500/15 text-white"
+                        : "border-white/10 bg-white/5 text-white/80"
+                        }`}
                     >
                       <p className="text-sm font-semibold">{camera.displayName}</p>
                       <p className="mt-1 text-xs text-white/45">
