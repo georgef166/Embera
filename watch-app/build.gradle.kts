@@ -1,9 +1,6 @@
-import org.jetbrains.kotlin.kapt3.native.android.internal.Utils.capitalize
-
 plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
-    id("kotlin-kapt")
+    id("com.android.application") version "9.0.0"
+    id("org.jetbrains.kotlin.plugin.compose") version "2.3.10"
 }
 
 android {
@@ -33,9 +30,6 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
-    }
-    kotlinOptions {
-        jvmTarget = "1.8"
     }
     buildFeatures {
         compose = true
@@ -68,6 +62,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    implementation("com.google.guava:guava:33.5.0-jre")
+    implementation("com.google.android.gms:play-services-location:21.2.0")
 
 
     // Networking (WebSockets)

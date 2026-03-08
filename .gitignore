@@ -1,0 +1,28 @@
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# Node.js
+node_modules/
+dist/
+build/
+.npm
+npm-debug.log*
+
+# Android / Gradle
+.gradle/
+build/
+captures/
+*.apk
+*.aar
+*.jks
+gradle-app.setting
+local.properties
+.navigation/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini

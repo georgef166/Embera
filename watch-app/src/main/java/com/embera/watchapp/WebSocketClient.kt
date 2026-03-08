@@ -72,6 +72,18 @@ class WebSocketClient(private val scope: CoroutineScope) {
         }
     }
 
+    fun sendBinary(data: ByteArray) {
+        scope.launch(Dispatchers.IO) {
+            if (session?.isActive == true) {
+                try {
+                    session?.send(Frame.Binary(true, data))
+                } catch (e: Exception) {
+                    println("Failed to send binary data: ${e.message}")
+                }
+            }
+        }
+    }
+
     fun disconnect() {
         reconnectJob?.cancel()
         scope.launch {

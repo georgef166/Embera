@@ -5,27 +5,34 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
-import android.hardware.Sensor
-import android.hardware.SensorEvent
-import android.hardware.SensorEventListener
-import android.hardware.SensorManager
 import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.health.services.client.HealthServices
 import androidx.health.services.client.MeasureCallback
 import androidx.health.services.client.data.Availability
+import androidx.health.services.client.data.DataPointContainer
 import androidx.health.services.client.data.DataType
-import androidx.health.services.client.data.MeasureData
+import androidx.health.services.client.data.DeltaDataType
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlin.math.sqrt
+import kotlin.random.Random
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaRecorder
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationResult
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
 
-class RealTimeDataService : Service(), SensorEventListener {
+class RealTimeDataService : Service() {
 
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(Dispatchers.Default + serviceJob)
@@ -33,40 +40,57 @@ class RealTimeDataService : Service(), SensorEventListener {
     private lateinit var healthServicesClient: androidx.health.services.client.MeasureClient
     private lateinit var powerManager: PowerManager
     private var wakeLock: PowerManager.WakeLock? = null
-    private lateinit var sensorManager: SensorManager
+    private lateinit var broadcastManager: LocalBroadcastManager
 
+    // Biometric data values
     private var heartRate: Double = 0.0
-    private var spo2: Double = 0.0
-    private var skinTemperature: Double = 0.0
-    private var isManDown: Boolean = false
+    private var oxygenSaturation: Double = 98.0 // Starting simulated value
+    private var skinTemperature: Double = 36.5 // Starting simulated value
+    private var currentLat: Double = 0.0
+    private var currentLng: Double = 0.0
 
-    private var lastMovementTimestamp: Long = 0
-    private val manDownThreshold = 10000L // 10 seconds
-    private val fallDetectionThreshold = 25.0 // m/s^2
+    // Streaming clients
+    private lateinit var webSocketClient: WebSocketClient
+    private lateinit var fusedLocationClient: FusedLocationProviderClient
+    private var audioRecord: AudioRecord? = null
+    private var isRecordingAudio = false
 
-    private val webSocketClient = WebSocketClient(serviceScope)
+    // Constants for Audio
+    private val sampleRate = 8000
+    private val channelConfig = AudioFormat.CHANNEL_IN_MONO
+    private val audioFormat = AudioFormat.ENCODING_PCM_16BIT
+    private val bufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
 
     override fun onCreate() {
         super.onCreate()
         healthServicesClient = HealthServices.getClient(this).measureClient
         powerManager = getSystemService(POWER_SERVICE) as PowerManager
-        sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
-
-        webSocketClient.connect("ws://192.168.1.100:8080/ws") // Replace with your server address
+        broadcastManager = LocalBroadcastManager.getInstance(this)
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        webSocketClient = WebSocketClient(serviceScope)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(1, createNotification())
         acquireWakeLock()
+        
+        // Connect to prototype backend
+        webSocketClient.connect("ws://10.190.147.86:8080/stream")
+
         startDataCollection()
+        startLocationTracking()
+        startAudioStreaming()
+        
         return START_STICKY
     }
 
     override fun onDestroy() {
         super.onDestroy()
         stopDataCollection()
-        releaseWakeLock()
+        stopAudioStreaming()
+        fusedLocationClient.removeLocationUpdates(locationCallback)
         webSocketClient.disconnect()
+        releaseWakeLock()
         serviceJob.cancel()
     }
 
@@ -98,71 +122,136 @@ class RealTimeDataService : Service(), SensorEventListener {
         wakeLock = null
     }
 
-    private fun startDataCollection() {
-        registerHealthServicesCallback(DataType.HEART_RATE_BPM)
-        registerHealthServicesCallback(DataType.SPO2)
-        // Skin temperature is not directly available, so we'll simulate for now
-        // registerHealthServicesCallback(DataType.SKIN_TEMPERATURE)
-        
-        val accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-        sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_NORMAL)
+    // Real Heart Rate Callback via Health Services API
+    private val heartRateCallback = object : MeasureCallback {
+        override fun onAvailabilityChanged(dataType: DeltaDataType<*, *>, availability: Availability) {}
+        override fun onDataReceived(data: DataPointContainer) {
+            data.getData(DataType.HEART_RATE_BPM).lastOrNull()?.let {
+                heartRate = it.value
+            }
+        }
+    }
 
-        lastMovementTimestamp = System.currentTimeMillis()
-        
+    private fun startDataCollection() {
+        // 1. Start real heart rate tracking
+        serviceScope.launch {
+            try {
+                healthServicesClient.registerMeasureCallback(DataType.HEART_RATE_BPM, heartRateCallback)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+
+        // 2. Start broadcast loop with simulated SpO2 and Skin Temp
         serviceScope.launch {
             while (true) {
-                checkManDownStatus()
-                val data = BiometricData(heartRate, spo2, skinTemperature, isManDown)
-                webSocketClient.sendBiometricData(data)
+                // Simulate SpO2 (95% - 100%)
+                oxygenSaturation += Random.nextDouble(-0.5, 0.5)
+                oxygenSaturation = oxygenSaturation.coerceIn(95.0, 100.0)
+
+                // Simulate Skin Temperature (36.0C - 37.5C)
+                skinTemperature += Random.nextDouble(-0.2, 0.2)
+                skinTemperature = skinTemperature.coerceIn(36.0, 37.5)
+
+                sendBiometricData()
                 delay(1000)
             }
         }
     }
 
     private fun stopDataCollection() {
-        healthServicesClient.clearMeasureCallback(DataType.HEART_RATE_BPM)
-        healthServicesClient.clearMeasureCallback(DataType.SPO2)
-        sensorManager.unregisterListener(this)
+        serviceScope.launch {
+            try {
+                healthServicesClient.unregisterMeasureCallbackAsync(DataType.HEART_RATE_BPM, heartRateCallback)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
-    private fun registerHealthServicesCallback(dataType: DataType<*, *>) {
-        val callback = object : MeasureCallback {
-            override fun onAvailabilityChanged(dataType: DataType<*, *>, availability: Availability) {}
+    private fun sendBiometricData() {
+        val intent = Intent(ACTION_BIOMETRIC_DATA).apply {
+            putExtra(EXTRA_HEART_RATE, heartRate)
+            putExtra(EXTRA_SPO2, oxygenSaturation)
+            putExtra(EXTRA_SKIN_TEMP, skinTemperature)
+        }
+        broadcastManager.sendBroadcast(intent)
+        
+        // Broadcast over WebSocket Directly
+        val payload = BiometricData(
+            heartRate = heartRate,
+            oxygenSaturation = oxygenSaturation,
+            skinTemperature = skinTemperature,
+            latitude = currentLat,
+            longitude = currentLng,
+            isManDown = false
+        )
+        webSocketClient.sendBiometricData(payload)
+    }
 
-            override fun onData(data: MeasureData) {
-                when (data.dataType) {
-                    DataType.HEART_RATE_BPM -> heartRate = (data.value as Double)
-                    DataType.SPO2 -> spo2 = (data.value as Double)
-                    // DataType.SKIN_TEMPERATURE -> skinTemperature = (data.value as Double)
+    private val locationCallback = object : LocationCallback() {
+        override fun onLocationResult(locationResult: LocationResult) {
+            locationResult.lastLocation?.let { location ->
+                currentLat = location.latitude
+                currentLng = location.longitude
+            }
+        }
+    }
+
+    private fun startLocationTracking() {
+        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000)
+            .setMinUpdateIntervalMillis(2000)
+            .build()
+
+        try {
+            fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, null)
+        } catch (e: SecurityException) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun startAudioStreaming() {
+        try {
+            audioRecord = AudioRecord(
+                MediaRecorder.AudioSource.MIC,
+                sampleRate,
+                channelConfig,
+                audioFormat,
+                bufferSize
+            )
+
+            if (audioRecord?.state == AudioRecord.STATE_INITIALIZED) {
+                audioRecord?.startRecording()
+                isRecordingAudio = true
+
+                serviceScope.launch(Dispatchers.IO) {
+                    val audioBuffer = ByteArray(bufferSize)
+                    while (isRecordingAudio) {
+                        val bytesRead = audioRecord?.read(audioBuffer, 0, bufferSize) ?: 0
+                        if (bytesRead > 0) {
+                            // Trim to actual bytes read
+                            val chunk = audioBuffer.copyOfRange(0, bytesRead)
+                            webSocketClient.sendBinary(chunk)
+                        }
+                    }
                 }
             }
-        }
-        healthServicesClient.registerMeasureCallback(dataType, callback)
-    }
-    
-    override fun onSensorChanged(event: SensorEvent?) {
-        if (event?.sensor?.type == Sensor.TYPE_ACCELEROMETER) {
-            val x = event.values[0]
-            val y = event.values[1]
-            val z = event.values[2]
-            
-            val magnitude = sqrt((x * x + y * y + z * z).toDouble())
-
-            if (magnitude > 1.0) { // Simple movement check
-                lastMovementTimestamp = System.currentTimeMillis()
-            }
-
-            if (magnitude > fallDetectionThreshold) {
-                isManDown = true
-            }
+        } catch (e: SecurityException) {
+            e.printStackTrace()
         }
     }
 
-    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
-    
-    private fun checkManDownStatus() {
-        if (System.currentTimeMillis() - lastMovementTimestamp > manDownThreshold) {
-            isManDown = true
-        }
+    private fun stopAudioStreaming() {
+        isRecordingAudio = false
+        audioRecord?.stop()
+        audioRecord?.release()
+        audioRecord = null
+    }
+
+    companion object {
+        const val ACTION_BIOMETRIC_DATA = "com.embera.watchapp.ACTION_BIOMETRIC_DATA"
+        const val EXTRA_HEART_RATE = "com.embera.watchapp.EXTRA_HEART_RATE"
+        const val EXTRA_SPO2 = "com.embera.watchapp.EXTRA_SPO2"
+        const val EXTRA_SKIN_TEMP = "com.embera.watchapp.EXTRA_SKIN_TEMP"
     }
 }
