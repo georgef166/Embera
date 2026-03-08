@@ -6,7 +6,9 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
+import android.content.pm.ServiceInfo
 import androidx.core.app.NotificationCompat
 import androidx.health.services.client.HealthServices
 import androidx.health.services.client.MeasureCallback
@@ -32,7 +34,7 @@ import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 
-class RealTimeDataService : Service() {
+class   RealTimeDataService : Service() {
 
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(Dispatchers.Default + serviceJob)
@@ -71,7 +73,11 @@ class RealTimeDataService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(1, createNotification())
+        val typeFlags = ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH or
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION or
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                
+        startForeground(1, createNotification(), typeFlags)
         acquireWakeLock()
         
         // Connect to prototype backend
@@ -81,11 +87,13 @@ class RealTimeDataService : Service() {
         startLocationTracking()
         startAudioStreaming()
         
+        isServiceRunning = true
         return START_STICKY
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        isServiceRunning = false
         stopDataCollection()
         stopAudioStreaming()
         fusedLocationClient.removeLocationUpdates(locationCallback)
@@ -153,6 +161,7 @@ class RealTimeDataService : Service() {
                 skinTemperature += Random.nextDouble(-0.2, 0.2)
                 skinTemperature = skinTemperature.coerceIn(36.0, 37.5)
 
+                println("DIAGNOSTIC: Attempting to send Biometric Data (HR: $heartRate)")
                 sendBiometricData()
                 delay(1000)
             }
@@ -199,14 +208,33 @@ class RealTimeDataService : Service() {
     }
 
     private fun startLocationTracking() {
-        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000)
+        // Use balanced power for faster indoor locks (Wi-Fi based)
+        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_BALANCED_POWER_ACCURACY, 5000)
             .setMinUpdateIntervalMillis(2000)
             .build()
 
         try {
-            fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, null)
+            fusedLocationClient.lastLocation
+                .addOnSuccessListener { location ->
+                    if (location != null) {
+                        currentLat = location.latitude
+                        currentLng = location.longitude
+                        println("SUCCESS: Grabbed Last Known Location ($currentLat, $currentLng)")
+                    } else {
+                        println("WARNING: Last Known Location is NULL")
+                    }
+                }
+                .addOnFailureListener { e ->
+                    println("ERROR: Failed to get Last Known Location: ${e.message}")
+                }
+
+            val task = fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, Looper.getMainLooper())
+            task.addOnFailureListener { e ->
+                println("ERROR: requestLocationUpdates failed: ${e.message}")
+            }
+            println("SUCCESS: Started Location Updates")
         } catch (e: SecurityException) {
-            e.printStackTrace()
+            println("ERROR: Missing Location Permission")
         }
     }
 
@@ -223,21 +251,29 @@ class RealTimeDataService : Service() {
             if (audioRecord?.state == AudioRecord.STATE_INITIALIZED) {
                 audioRecord?.startRecording()
                 isRecordingAudio = true
+                println("SUCCESS: Started Audio Recording")
 
                 serviceScope.launch(Dispatchers.IO) {
-                    val audioBuffer = ByteArray(bufferSize)
-                    while (isRecordingAudio) {
-                        val bytesRead = audioRecord?.read(audioBuffer, 0, bufferSize) ?: 0
-                        if (bytesRead > 0) {
-                            // Trim to actual bytes read
-                            val chunk = audioBuffer.copyOfRange(0, bytesRead)
-                            webSocketClient.sendBinary(chunk)
+                    try {
+                        val audioBuffer = ByteArray(bufferSize)
+                        while (isRecordingAudio) {
+                            val bytesRead = audioRecord?.read(audioBuffer, 0, bufferSize) ?: 0
+                            if (bytesRead > 0) {
+                                // We must copy because the buffer is reused
+                                val chunk = audioBuffer.copyOfRange(0, bytesRead)
+                                webSocketClient.sendBinary(chunk)
+                            }
                         }
+                    } catch (t: Throwable) {
+                        println("FATAL ERROR: Audio Recording loop crashed: ${t.message}")
+                        t.printStackTrace()
                     }
                 }
+            } else {
+                 println("ERROR: AudioRecord failed to initialize")
             }
         } catch (e: SecurityException) {
-            e.printStackTrace()
+            println("ERROR: Missing Record Audio Permission")
         }
     }
 
@@ -249,6 +285,7 @@ class RealTimeDataService : Service() {
     }
 
     companion object {
+        var isServiceRunning = false
         const val ACTION_BIOMETRIC_DATA = "com.embera.watchapp.ACTION_BIOMETRIC_DATA"
         const val EXTRA_HEART_RATE = "com.embera.watchapp.EXTRA_HEART_RATE"
         const val EXTRA_SPO2 = "com.embera.watchapp.EXTRA_SPO2"

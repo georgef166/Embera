@@ -1,5 +1,6 @@
 package com.embera.watchapp
 
+import kotlin.jvm.Volatile
 import io.ktor.client.*
 import io.ktor.client.engine.cio.*
 import io.ktor.client.plugins.websocket.*
@@ -9,6 +10,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,10 +26,12 @@ class WebSocketClient(private val scope: CoroutineScope) {
         install(WebSockets)
     }
 
+    @Volatile
     private var session: DefaultClientWebSocketSession? = null
     private val _isConnected = MutableStateFlow(false)
     val isConnected: StateFlow<Boolean> = _isConnected.asStateFlow()
 
+    private val messageChannel = Channel<Frame>(capacity = Channel.BUFFERED)
     private var reconnectJob: Job? = null
 
     fun connect(url: String) {
@@ -42,13 +46,32 @@ class WebSocketClient(private val scope: CoroutineScope) {
                         session = this
                         _isConnected.value = true
                         println("WebSocket connection established.")
-                        // Keep the connection alive
-                        while (isActive) {
-                            incoming.receiveCatching()
+
+                        // Launch a consumer coroutine to send queued messages
+                        val senderJob = launch {
+                            try {
+                                for (frame in messageChannel) {
+                                    if (isActive) {
+                                        send(frame)
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                println("ERROR: Sender loop crashed: ${e.message}")
+                            }
+                        }
+
+                        try {
+                            // Listen for incoming messages (keep-alive)
+                            while (isActive) {
+                                incoming.receive()
+                            }
+                        } finally {
+                            senderJob.cancel()
                         }
                     }
-                } catch (e: Exception) {
-                    println("WebSocket connection failed: ${e.message}")
+                } catch (t: Throwable) {
+                    println("FATAL ERROR: WebSocket connection crashed: ${t.message}")
+                    t.printStackTrace()
                 } finally {
                     session = null
                     _isConnected.value = false
@@ -60,32 +83,23 @@ class WebSocketClient(private val scope: CoroutineScope) {
     }
 
     fun sendBiometricData(data: BiometricData) {
-        scope.launch(Dispatchers.IO) {
-            if (session?.isActive == true) {
-                try {
-                    val json = Json.encodeToString(data)
-                    session?.send(Frame.Text(json))
-                } catch (e: Exception) {
-                    println("Failed to send biometric data: ${e.message}")
-                }
-            }
+        val json = Json.encodeToString(data)
+        val result = messageChannel.trySend(Frame.Text(json))
+        if (result.isSuccess) {
+            println("QUEUED: Biometric JSON")
+        } else {
+            println("DROPPED: Biometric data (Queue full or closed)")
         }
     }
 
     fun sendBinary(data: ByteArray) {
-        scope.launch(Dispatchers.IO) {
-            if (session?.isActive == true) {
-                try {
-                    session?.send(Frame.Binary(true, data))
-                } catch (e: Exception) {
-                    println("Failed to send binary data: ${e.message}")
-                }
-            }
-        }
+        // We use trySend to avoid blocking the audio recording loop
+        messageChannel.trySend(Frame.Binary(true, data))
     }
 
     fun disconnect() {
         reconnectJob?.cancel()
+        messageChannel.close()
         scope.launch {
             session?.close()
             session = null

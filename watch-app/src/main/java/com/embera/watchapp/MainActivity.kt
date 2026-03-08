@@ -33,7 +33,10 @@ class MainActivity : ComponentActivity() {
 
     private val requiredPermissions = arrayOf(
         Manifest.permission.BODY_SENSORS,
-        Manifest.permission.FOREGROUND_SERVICE
+        Manifest.permission.FOREGROUND_SERVICE,
+        Manifest.permission.RECORD_AUDIO,
+        Manifest.permission.ACCESS_FINE_LOCATION,
+        Manifest.permission.ACCESS_COARSE_LOCATION
     )
 
     private val requestPermissionLauncher =
@@ -48,8 +51,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            WearApp(onStartClick = {
-                checkPermissionsAndStartService()
+            WearApp(onToggleService = { start ->
+                if (start) {
+                    checkPermissionsAndStartService()
+                } else {
+                    stopDataService()
+                }
             })
         }
     }
@@ -72,10 +79,16 @@ class MainActivity : ComponentActivity() {
         val intent = Intent(this, RealTimeDataService::class.java)
         startForegroundService(intent)
     }
+
+    private fun stopDataService() {
+        val intent = Intent(this, RealTimeDataService::class.java)
+        stopService(intent)
+    }
 }
 
 @Composable
-fun WearApp(onStartClick: () -> Unit) {
+fun WearApp(onToggleService: (Boolean) -> Unit) {
+    var isRunning by remember { mutableStateOf(RealTimeDataService.isServiceRunning) }
     var heartRate by remember { mutableStateOf(0.0) }
     var oxygenSaturation by remember { mutableStateOf(0.0) }
     var skinTemperature by remember { mutableStateOf(0.0) }
@@ -112,8 +125,11 @@ fun WearApp(onStartClick: () -> Unit) {
         Text("HR: ${heartRate.toInt()} bpm")
         Text(String.format(Locale.getDefault(), "SpO2: %.1f%%", oxygenSaturation))
         Text(String.format(Locale.getDefault(), "Temp: %.1f°C", skinTemperature))
-        Button(onClick = onStartClick) {
-            Text("Start")
+        Button(onClick = {
+            isRunning = !isRunning
+            onToggleService(isRunning)
+        }) {
+            Text(if (isRunning) "Stop" else "Start")
         }
     }
 }
