@@ -49,7 +49,7 @@ class ReturnArrow(BaseModel):
 
 class Biometrics(BaseModel):
     heartRate: int
-    oxygen: int
+    oxygen: float
     stressIndex: int
     skinTempC: float
     battery: int
@@ -573,7 +573,7 @@ def simulate_session(snapshot: SessionSnapshot, seed: int) -> SessionSnapshot:
     next_status = "active" if seed % 5 else "monitoring"
     stream_health = max(62, min(99, snapshot.streamHealth + random.randint(-6, 4)))
     heart_rate = max(108, min(154, snapshot.biometrics.heartRate + random.randint(-4, 6)))
-    oxygen = max(93, min(99, snapshot.biometrics.oxygen + random.randint(-1, 1)))
+    oxygen = max(93.0, min(99.9, snapshot.biometrics.oxygen + random.uniform(-0.5, 0.5)))
     stress_index = max(41, min(88, snapshot.biometrics.stressIndex + random.randint(-3, 5)))
     skin_temp = max(36.8, min(38.9, snapshot.biometrics.skinTempC + random.uniform(-0.2, 0.18)))
     battery = max(28, snapshot.biometrics.battery - random.randint(0, 2))
@@ -604,7 +604,7 @@ def simulate_session(snapshot: SessionSnapshot, seed: int) -> SessionSnapshot:
         note="Observer HUD mirrors the firefighter context while rendering a separate three.js route back to safety.",
         biometrics=Biometrics(
             heartRate=heart_rate,
-            oxygen=oxygen,
+            oxygen=round(oxygen, 1),
             stressIndex=stress_index,
             skinTempC=round(skin_temp, 1),
             battery=battery,
@@ -755,7 +755,7 @@ async def websocket_stream(websocket: WebSocket, session_id: str):
                         
                         # Apply live biometrics from watch
                         snapshot.biometrics.heartRate = payload.get("heartRate", snapshot.biometrics.heartRate)
-                        snapshot.biometrics.oxygen = payload.get("oxygenSaturation", snapshot.biometrics.oxygen)
+                        snapshot.biometrics.oxygen = round(payload.get("oxygenSaturation", snapshot.biometrics.oxygen), 1)
                         snapshot.biometrics.skinTempC = round(payload.get("skinTemperature", snapshot.biometrics.skinTempC), 1)
                         snapshot.biometrics.lastUpdated = timestamp
                         

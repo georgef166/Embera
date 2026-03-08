@@ -31,7 +31,7 @@ export function WatchTelemetryOverlay({
             <div className="flex flex-col gap-0.5 mt-2">
                 <span className="text-[10px] font-bold uppercase tracking-widest text-[#00ff85]/70 [text-shadow:0_0_6px_rgba(0,255,133,0.35)]">Oxygen (SpO2)</span>
                 <div className="flex items-end gap-1 text-[#00ff85]">
-                    <span className="text-3xl font-mono font-bold leading-none [text-shadow:0_0_6px_rgba(0,255,133,0.35)]">{oxygen}</span>
+                    <span className="text-3xl font-mono font-bold leading-none [text-shadow:0_0_6px_rgba(0,255,133,0.35)]">{oxygen.toFixed(1)}</span>
                     <span className="text-[10px] mb-1 font-mono uppercase tracking-widest [text-shadow:0_0_6px_rgba(0,255,133,0.35)]">%</span>
                 </div>
             </div>
