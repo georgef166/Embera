@@ -55,12 +55,10 @@
   z-index: 0;
   background:
     linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%),
-    linear-gradient(
-      90deg,
+    linear-gradient(90deg,
       rgba(255, 0, 0, 0.05),
       rgba(0, 255, 133, 0.03),
-      rgba(0, 180, 255, 0.05)
-    );
+      rgba(0, 180, 255, 0.05));
   background-size:
     100% 2px,
     3px 100%;
@@ -147,6 +145,44 @@
 
 .statusError {
   color: #ff4d57;
+}
+
+.modePanel {
+  position: absolute;
+  top: 80px;
+  right: 30px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: auto;
+  z-index: 100;
+}
+
+.modeBtn {
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: white;
+  padding: 8px 16px;
+  font-family: var(--font-geist-mono), "Courier New", monospace;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(4px);
+  text-align: right;
+}
+
+.modeBtn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.modeBtnActive {
+  background: rgba(0, 255, 133, 0.15);
+  border: 1px solid #00ff85;
+  color: #00ff85;
+  box-shadow: 0 0 10px rgba(0, 255, 133, 0.2), inset 0 0 10px rgba(0, 255, 133, 0.1);
+  text-shadow: 0 0 4px rgba(0, 255, 133, 0.5);
 }
 
 @media (max-width: 720px) {

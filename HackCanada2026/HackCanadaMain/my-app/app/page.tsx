@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { FireSightView } from "@/components/firesight-view";
-import { startFireSightPublisherUi } from "@/lib/firesight-publisher-ui";
+import { startFireSightPublisherUi, ViewMode } from "@/lib/firesight-publisher-ui";
 import {
   PEER_CONFIGURATION,
   type ViewerProfile,
@@ -196,6 +196,12 @@ export default function Home() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [modelStatus, setModelStatus] = useState(DEFAULT_MODEL_STATUS);
   const [systemStatus, setSystemStatus] = useState(DEFAULT_SYSTEM_STATUS);
+  const [viewMode, setViewMode] = useState<ViewMode>(ViewMode.CONTOUR);
+  const setViewModeRef = useRef<(mode: ViewMode) => void>(() => { });
+
+  useEffect(() => {
+    setViewModeRef.current(viewMode);
+  }, [viewMode]);
 
   useEffect(() => {
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
@@ -219,7 +225,7 @@ export default function Home() {
     let lastMessageId = 0;
     let pollTimeoutId = 0;
     let shouldRepublish = false;
-    let stopFireSightUi = () => {};
+    let stopFireSightUi = () => { };
     let currentViewerPreferences = DEFAULT_VIEWER_STREAM_PREFERENCES;
 
     const closePeerConnection = () => {
@@ -376,13 +382,16 @@ export default function Home() {
 
         if (videoRef.current && canvasRef.current) {
           try {
-            stopFireSightUi = await startFireSightPublisherUi({
+            const { stop, setViewMode } = await startFireSightPublisherUi({
               canvasElement: canvasRef.current,
               onModelStatusChange: setModelStatus,
               onSystemStatusChange: setSystemStatus,
               stream: cameraStream,
               videoElement: videoRef.current,
             });
+            stopFireSightUi = stop;
+            setViewModeRef.current = setViewMode;
+            setViewModeRef.current(viewMode);
           } catch (error) {
             setSystemStatus("SYS: HUD FAIL");
             setModelStatus("AI: FAILED");
@@ -448,6 +457,7 @@ export default function Home() {
       cameraStream?.getTracks().forEach((track) => track.stop());
       microphoneStream?.getTracks().forEach((track) => track.stop());
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -456,6 +466,8 @@ export default function Home() {
       modelStatus={modelStatus}
       systemStatus={systemStatus}
       videoRef={videoRef}
+      currentViewMode={viewMode}
+      onViewModeChange={setViewMode}
     />
   );
 }

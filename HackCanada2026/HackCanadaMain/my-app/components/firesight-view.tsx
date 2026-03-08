@@ -1,5 +1,6 @@
 import type { RefObject } from "react";
 import styles from "@/components/firesight-view.module.css";
+import { ViewMode } from "@/lib/firesight-publisher-ui";
 
 interface FireSightViewProps {
   canvasRef: RefObject<HTMLCanvasElement | null>;
@@ -7,6 +8,8 @@ interface FireSightViewProps {
   navStatus?: string;
   systemStatus: string;
   videoRef: RefObject<HTMLVideoElement | null>;
+  currentViewMode: ViewMode;
+  onViewModeChange: (mode: ViewMode) => void;
 }
 
 function resolveStatusClass(status: string) {
@@ -32,6 +35,8 @@ export function FireSightView({
   navStatus = "NAV: EXIT TRACKING",
   systemStatus,
   videoRef,
+  currentViewMode,
+  onViewModeChange,
 }: FireSightViewProps) {
   return (
     <main className={styles.shell}>
@@ -58,6 +63,27 @@ export function FireSightView({
           <span className={`${styles.status} ${resolveStatusClass(modelStatus)}`}>
             {modelStatus}
           </span>
+        </div>
+
+        <div className={styles.modePanel}>
+          <button
+            className={`${styles.modeBtn} ${currentViewMode === ViewMode.REGULAR ? styles.modeBtnActive : ""}`}
+            onClick={() => onViewModeChange(ViewMode.REGULAR)}
+          >
+            REGULAR
+          </button>
+          <button
+            className={`${styles.modeBtn} ${currentViewMode === ViewMode.CONTOUR ? styles.modeBtnActive : ""}`}
+            onClick={() => onViewModeChange(ViewMode.CONTOUR)}
+          >
+            CONTOUR
+          </button>
+          <button
+            className={`${styles.modeBtn} ${currentViewMode === ViewMode.THERMAL ? styles.modeBtnActive : ""}`}
+            onClick={() => onViewModeChange(ViewMode.THERMAL)}
+          >
+            THERMAL
+          </button>
         </div>
 
         <div className={styles.bottom}>

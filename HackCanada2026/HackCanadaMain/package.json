@@ -1,0 +1,21 @@
+{
+  "name": "hackcanada-main",
+  "private": true,
+  "workspaces": [
+    "my-app"
+  ],
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.2.1",
+    "postcss": "^8.5.8",
+    "tailwindcss": "^4.2.1"
+  },
+  "scripts": {
+    "dev": "npm --workspace my-app run dev",
+    "build": "npm --workspace my-app run build",
+    "lint": "npm --workspace my-app run lint",
+    "frontend:dev": "npm --workspace my-app run dev",
+    "frontend:build": "npm --workspace my-app run build",
+    "frontend:lint": "npm --workspace my-app run lint",
+    "backend:dev": "python3 backend/main.py"
+  }
+}

@@ -1,3 +1,9 @@
+export enum ViewMode {
+  REGULAR,
+  CONTOUR,
+  THERMAL,
+}
+
 interface CocoPrediction {
   bbox: [number, number, number, number];
   class: string;
@@ -6,13 +12,6 @@ interface CocoPrediction {
 
 interface DetectionModel {
   detect(input: HTMLCanvasElement | HTMLVideoElement): Promise<CocoPrediction[]>;
-}
-
-interface BreadcrumbPoint {
-  alpha: number;
-  scale: number;
-  x: number;
-  y: number;
 }
 
 interface StartFireSightPublisherUiOptions {
@@ -58,11 +57,8 @@ const DETECTION_ENABLED_BY_DEFAULT = true;
 const ANALYSIS_DIMENSION_STEPS = [384, 320, 256];
 const DETECTION_FPS_STEPS = [3, 2, 1];
 const EDGE_ANALYSIS_SCALE = 0.5;
-const EDGE_FPS_STEPS = [6, 4, 3, 2];
-const EDGE_SAMPLE_STRIDE = 2;
-const EDGE_THRESHOLD = 96;
+const EDGE_FPS_STEPS = [60, 30, 15, 5];
 const LOW_FPS_THRESHOLD = 28;
-const ORIENTATION_EVENT_NAME = "deviceorientation";
 const PERFORMANCE_WINDOW_MS = 1_500;
 
 let detectionModelPromise: Promise<DetectionModel> | null = null;
@@ -221,82 +217,6 @@ function applySmokeEffect(
   context.fillRect(0, 0, canvasElement.width, canvasElement.height);
 }
 
-function drawBreadcrumbs(
-  context: CanvasRenderingContext2D,
-  canvasElement: HTMLCanvasElement,
-  breadcrumbs: BreadcrumbPoint[],
-  currentHeading: number,
-  frameCount: number,
-) {
-  for (const breadcrumb of breadcrumbs) {
-    context.save();
-    context.beginPath();
-    context.arc(breadcrumb.x, breadcrumb.y, 6 * breadcrumb.scale, 0, 2 * Math.PI);
-    context.fillStyle = `rgba(0, 255, 255, ${breadcrumb.alpha})`;
-    context.shadowBlur = 15;
-    context.shadowColor = "cyan";
-    context.fill();
-    context.restore();
-  }
-
-  const arrowX = canvasElement.width / 2;
-  const arrowY = canvasElement.height - 80;
-
-  context.save();
-  context.translate(arrowX, arrowY);
-  context.rotate(
-    Math.sin(frameCount * 0.05) * 0.3 + currentHeading * (Math.PI / 180),
-  );
-
-  context.beginPath();
-  context.moveTo(0, -30);
-  context.lineTo(20, 10);
-  context.lineTo(10, 10);
-  context.lineTo(10, 30);
-  context.lineTo(-10, 30);
-  context.lineTo(-10, 10);
-  context.lineTo(-20, 10);
-  context.closePath();
-  context.fillStyle = "rgba(0, 255, 0, 0.8)";
-  context.fill();
-  context.strokeStyle = "#fff";
-  context.lineWidth = 2;
-  context.stroke();
-  context.fillStyle = "#00ff85";
-  context.font = 'bold 16px "Courier New", monospace';
-  context.textAlign = "center";
-  context.fillText("EVAC", 0, 50);
-  context.restore();
-}
-
-function updateBreadcrumbs(
-  canvasElement: HTMLCanvasElement,
-  breadcrumbs: BreadcrumbPoint[],
-  frameCount: number,
-) {
-  if (frameCount % 45 === 0) {
-    breadcrumbs.push({
-      alpha: 1,
-      scale: 1,
-      x: canvasElement.width / 2,
-      y: canvasElement.height * 0.7,
-    });
-  }
-
-  for (let index = breadcrumbs.length - 1; index >= 0; index -= 1) {
-    const breadcrumb = breadcrumbs[index];
-
-    breadcrumb.y += 2;
-    breadcrumb.x += Math.random() - 0.5;
-    breadcrumb.alpha -= 0.003;
-    breadcrumb.scale *= 1.01;
-
-    if (breadcrumb.alpha <= 0 || breadcrumb.y > canvasElement.height + 50) {
-      breadcrumbs.splice(index, 1);
-    }
-  }
-}
-
 function ensureCanvasSize(canvasElement: HTMLCanvasElement) {
   if (
     canvasElement.width !== window.innerWidth ||
@@ -391,14 +311,14 @@ async function attachStreamToVideo(
   videoElement.srcObject = stream;
 
   if (videoElement.readyState >= HTMLMediaElement.HAVE_METADATA) {
-    await videoElement.play().catch(() => {});
+    await videoElement.play().catch(() => { });
     return;
   }
 
   await new Promise<void>((resolve) => {
     const handleLoadedMetadata = () => {
       videoElement.removeEventListener("loadedmetadata", handleLoadedMetadata);
-      void videoElement.play().catch(() => {});
+      void videoElement.play().catch(() => { });
       resolve();
     };
 
@@ -430,7 +350,13 @@ export async function startFireSightPublisherUi({
   onSystemStatusChange,
   stream,
   videoElement,
-}: StartFireSightPublisherUiOptions): Promise<() => void> {
+}: StartFireSightPublisherUiOptions): Promise<{ stop: () => void; setViewMode: (mode: ViewMode) => void }> {
+  let currentViewMode = ViewMode.CONTOUR;
+
+  const setViewMode = (mode: ViewMode) => {
+    currentViewMode = mode;
+  };
+
   const context = canvasElement.getContext("2d");
 
   if (!context) {
@@ -451,8 +377,6 @@ export async function startFireSightPublisherUi({
 
   let isStopped = false;
   let animationFrameId = 0;
-  let frameCount = 0;
-  let currentHeading = 0;
   let detectionFailed = false;
   let detectionReady = false;
   let detectionInFlight = false;
@@ -472,7 +396,6 @@ export async function startFireSightPublisherUi({
   let lastCapturedVideoFrameSerial = -1;
   let lastCapturedVideoTime = Number.NEGATIVE_INFINITY;
   let pendingVideoFrameCallbackId = 0;
-  const breadcrumbs: BreadcrumbPoint[] = [];
 
   const scheduleNextVideoFrame = () => {
     if (isStopped || !supportsVideoFrameCallback) {
@@ -494,7 +417,6 @@ export async function startFireSightPublisherUi({
     isStopped = true;
     window.cancelAnimationFrame(animationFrameId);
     window.removeEventListener("resize", handleResize);
-    window.removeEventListener(ORIENTATION_EVENT_NAME, handleOrientation);
 
     if (supportsVideoFrameCallback && pendingVideoFrameCallbackId !== 0) {
       videoWithFrameCallback.cancelVideoFrameCallback?.(pendingVideoFrameCallbackId);
@@ -509,14 +431,6 @@ export async function startFireSightPublisherUi({
 
   const handleResize = () => {
     ensureCanvasSize(canvasElement);
-  };
-
-  const handleOrientation = (event: Event) => {
-    const orientationEvent = event as DeviceOrientationEvent;
-
-    if (typeof orientationEvent.alpha === "number") {
-      currentHeading = orientationEvent.alpha;
-    }
   };
 
   const ensureAnalysisFrame = (): AnalysisFrame | null => {
@@ -578,7 +492,7 @@ export async function startFireSightPublisherUi({
     };
   };
 
-  const processSobelFilter = (analysisFrame: AnalysisFrame) => {
+  const processSobelFilter = (displayRect: VideoDisplayRect) => {
     if (!edgeCanvas || !edgeContext) {
       edgeCanvas = document.createElement("canvas");
       edgeContext = edgeCanvas.getContext("2d", {
@@ -592,11 +506,11 @@ export async function startFireSightPublisherUi({
 
     const edgeWidth = Math.max(
       1,
-      Math.round(analysisFrame.width * EDGE_ANALYSIS_SCALE),
+      Math.floor(canvasElement.width * EDGE_ANALYSIS_SCALE),
     );
     const edgeHeight = Math.max(
       1,
-      Math.round(analysisFrame.height * EDGE_ANALYSIS_SCALE),
+      Math.floor(canvasElement.height * EDGE_ANALYSIS_SCALE),
     );
 
     if (
@@ -610,13 +524,16 @@ export async function startFireSightPublisherUi({
 
     edgeContext.imageSmoothingEnabled = false;
     edgeContext.clearRect(0, 0, edgeWidth, edgeHeight);
+
+    // Draw the video matching the screen's crop, scaled by our analysis scale
     edgeContext.drawImage(
-      analysisFrame.canvas,
-      0,
-      0,
-      edgeWidth,
-      edgeHeight,
+      videoElement,
+      displayRect.x * EDGE_ANALYSIS_SCALE,
+      displayRect.y * EDGE_ANALYSIS_SCALE,
+      displayRect.width * EDGE_ANALYSIS_SCALE,
+      displayRect.height * EDGE_ANALYSIS_SCALE,
     );
+
     const imageData = edgeContext.getImageData(
       0,
       0,
@@ -627,60 +544,59 @@ export async function startFireSightPublisherUi({
     const output =
       edgeOutputImageData ?? edgeContext.createImageData(edgeWidth, edgeHeight);
     const destination = output.data;
-    destination.fill(0);
 
-    const getIntensity = (offset: number) => {
-      const red = source[offset];
-      const green = source[offset + 1];
-      const blue = source[offset + 2];
+    // Clear destination
+    for (let i = 0; i < destination.length; i += 4) {
+      destination[i] = 0;
+      destination[i + 1] = 0;
+      destination[i + 2] = 0;
+      destination[i + 3] = 0;
+    }
 
-      // Cheap luma approximation biased toward green.
-      return (red + (green << 1) + blue) >> 2;
+    const w = edgeWidth;
+    const h = edgeHeight;
+
+    // Sobel kernels
+    const kernelX = [-1, 0, 1, -2, 0, 2, -1, 0, 1];
+    const kernelY = [-1, -2, -1, 0, 0, 0, 1, 2, 1];
+
+    // Helper to get pixel intensity (grayscale)
+    const getIntensity = (x: number, y: number) => {
+      if (x < 0 || x >= w || y < 0 || y >= h) return 0;
+      const offset = (y * w + x) * 4;
+      // Fast luminance
+      return (source[offset] * 0.299 + source[offset + 1] * 0.587 + source[offset + 2] * 0.114);
     };
 
-    for (
-      let y = 0;
-      y < edgeHeight - EDGE_SAMPLE_STRIDE;
-      y += EDGE_SAMPLE_STRIDE
-    ) {
-      for (
-        let x = 0;
-        x < edgeWidth - EDGE_SAMPLE_STRIDE;
-        x += EDGE_SAMPLE_STRIDE
-      ) {
-        const offset = (y * edgeWidth + x) * 4;
-        const rightOffset = offset + EDGE_SAMPLE_STRIDE * 4;
-        const downOffset = offset + EDGE_SAMPLE_STRIDE * edgeWidth * 4;
-        const intensity = getIntensity(offset);
-        const horizontalDiff = Math.abs(intensity - getIntensity(rightOffset));
-        const verticalDiff = Math.abs(intensity - getIntensity(downOffset));
-        const edgeStrength = horizontalDiff + verticalDiff;
+    // Apply Kernel (skip outmost border pixels for speed/safety)
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        let pixelX = 0;
+        let pixelY = 0;
 
-        if (edgeStrength <= EDGE_THRESHOLD) {
-          continue;
-        }
-
-        for (let blockY = 0; blockY < EDGE_SAMPLE_STRIDE; blockY += 1) {
-          const targetY = y + blockY;
-
-          if (targetY >= edgeHeight) {
-            break;
-          }
-
-          for (let blockX = 0; blockX < EDGE_SAMPLE_STRIDE; blockX += 1) {
-            const targetX = x + blockX;
-
-            if (targetX >= edgeWidth) {
-              break;
-            }
-
-            const destinationOffset = (targetY * edgeWidth + targetX) * 4;
-            destination[destinationOffset] = 255;
-            destination[destinationOffset + 1] = 255;
-            destination[destinationOffset + 2] = 255;
-            destination[destinationOffset + 3] = 255;
+        // 3x3 convolution
+        for (let ky = -1; ky <= 1; ky++) {
+          for (let kx = -1; kx <= 1; kx++) {
+            const intensity = getIntensity(x + kx, y + ky);
+            const weightX = kernelX[(ky + 1) * 3 + (kx + 1)];
+            const weightY = kernelY[(ky + 1) * 3 + (kx + 1)];
+            pixelX += intensity * weightX;
+            pixelY += intensity * weightY;
           }
         }
+
+        // Magnitude
+        const magnitude = Math.sqrt(pixelX * pixelX + pixelY * pixelY);
+
+        // Lowered threshold slightly so more edges are picked up
+        const val = magnitude > 70 ? 255 : 0;
+
+        const offset = (y * w + x) * 4;
+        // We want white edges on a transparent background so it overlays nicely.
+        destination[offset] = 255;     // R
+        destination[offset + 1] = 255;   // G
+        destination[offset + 2] = 255;   // B
+        destination[offset + 3] = val;   // Alpha (255 if edge, 0 if not)
       }
     }
 
@@ -688,7 +604,7 @@ export async function startFireSightPublisherUi({
     edgeContext.putImageData(output, 0, 0);
   };
 
-  const drawSobelOverlay = (displayRect: VideoDisplayRect) => {
+  const drawSobelOverlay = () => {
     if (!edgeCanvas) {
       return;
     }
@@ -697,6 +613,91 @@ export async function startFireSightPublisherUi({
     context.imageSmoothingEnabled = false;
     context.drawImage(
       edgeCanvas,
+      0,
+      0,
+      canvasElement.width,
+      canvasElement.height,
+    );
+    context.imageSmoothingEnabled = previousSmoothing;
+  };
+
+  let thermalCanvas: HTMLCanvasElement | null = null;
+  let thermalContext: CanvasRenderingContext2D | null = null;
+
+  const processThermalFilter = (analysisFrame: AnalysisFrame) => {
+    if (!thermalCanvas || !thermalContext) {
+      thermalCanvas = document.createElement("canvas");
+      thermalContext = thermalCanvas.getContext("2d", {
+        willReadFrequently: true,
+      });
+    }
+
+    if (!thermalCanvas || !thermalContext) {
+      return;
+    }
+
+    const processWidth = Math.max(1, Math.round(analysisFrame.width * EDGE_ANALYSIS_SCALE));
+    const processHeight = Math.max(1, Math.round(analysisFrame.height * EDGE_ANALYSIS_SCALE));
+
+    if (thermalCanvas.width !== processWidth || thermalCanvas.height !== processHeight) {
+      thermalCanvas.width = processWidth;
+      thermalCanvas.height = processHeight;
+    }
+
+    thermalContext.drawImage(analysisFrame.canvas, 0, 0, processWidth, processHeight);
+
+    const imgData = thermalContext.getImageData(0, 0, processWidth, processHeight);
+    const src = imgData.data;
+    const output = new ImageData(processWidth, processHeight);
+    const dst = output.data;
+
+    // Apply color gradient based on luminance
+    for (let i = 0; i < src.length; i += 4) {
+      const r = src[i];
+      const g = src[i + 1];
+      const b = src[i + 2];
+      const alpha = src[i + 3];
+
+      const luminance = r * 0.299 + g * 0.587 + b * 0.114;
+      const normalizedLum = luminance / 255;
+
+      let outR = 0, outG = 0, outB = 0;
+
+      if (normalizedLum < 0.33) {
+        const t = normalizedLum / 0.33;
+        outR = 0;
+        outG = 0;
+        outB = Math.round(t * 255);
+      } else if (normalizedLum < 0.66) {
+        const t = (normalizedLum - 0.33) / 0.33;
+        outR = Math.round(t * 255);
+        outG = Math.round(t * 255);
+        outB = Math.round((1 - t) * 255);
+      } else {
+        const t = (normalizedLum - 0.66) / 0.34;
+        outR = 255;
+        outG = Math.round((1 - t) * 255);
+        outB = Math.round((1 - t) * 255);
+      }
+
+      dst[i] = outR;
+      dst[i + 1] = outG;
+      dst[i + 2] = outB;
+      dst[i + 3] = alpha;
+    }
+
+    thermalContext.putImageData(output, 0, 0);
+  };
+
+  const drawThermalOverlay = (displayRect: VideoDisplayRect) => {
+    if (!thermalCanvas) {
+      return;
+    }
+
+    const previousSmoothing = context.imageSmoothingEnabled;
+    context.imageSmoothingEnabled = false;
+    context.drawImage(
+      thermalCanvas,
       displayRect.x,
       displayRect.y,
       displayRect.width,
@@ -826,7 +827,6 @@ export async function startFireSightPublisherUi({
       return;
     }
 
-    frameCount += 1;
     maybeDegradePerformanceBudget(now);
     context.clearRect(0, 0, canvasElement.width, canvasElement.height);
 
@@ -847,9 +847,16 @@ export async function startFireSightPublisherUi({
         analysisFrame = ensureAnalysisFrame();
       }
 
-      if (shouldProcessEdge && analysisFrame) {
-        processSobelFilter(analysisFrame);
-        lastEdgeProcessedAt = now;
+      if (currentViewMode === ViewMode.CONTOUR) {
+        if (shouldProcessEdge) {
+          processSobelFilter(displayRect);
+          lastEdgeProcessedAt = now;
+        }
+      } else if (currentViewMode === ViewMode.THERMAL) {
+        if (shouldProcessEdge && analysisFrame) {
+          processThermalFilter(analysisFrame);
+          lastEdgeProcessedAt = now;
+        }
       }
 
       if (shouldDetect && analysisFrame) {
@@ -857,8 +864,12 @@ export async function startFireSightPublisherUi({
         lastDetectionAt = now;
       }
 
-      applySmokeEffect(context, canvasElement);
-      drawSobelOverlay(displayRect);
+      if (currentViewMode === ViewMode.CONTOUR) {
+        applySmokeEffect(context, canvasElement);
+        drawSobelOverlay();
+      } else if (currentViewMode === ViewMode.THERMAL) {
+        drawThermalOverlay(displayRect);
+      }
       drawBoundingBoxes(
         context,
         lastPredictions.map((prediction) =>
@@ -872,14 +883,6 @@ export async function startFireSightPublisherUi({
       );
     }
 
-    updateBreadcrumbs(canvasElement, breadcrumbs, frameCount);
-    drawBreadcrumbs(
-      context,
-      canvasElement,
-      breadcrumbs,
-      currentHeading,
-      frameCount,
-    );
     drawReticle(context, canvasElement);
 
     animationFrameId = window.requestAnimationFrame(renderLoop);
@@ -888,7 +891,6 @@ export async function startFireSightPublisherUi({
   ensureCanvasSize(canvasElement);
   onSystemStatusChange?.("SYS: ONLINE");
   window.addEventListener("resize", handleResize);
-  window.addEventListener(ORIENTATION_EVENT_NAME, handleOrientation);
 
   if (supportsVideoFrameCallback) {
     scheduleNextVideoFrame();
@@ -897,5 +899,5 @@ export async function startFireSightPublisherUi({
   void startDetectionModel();
   animationFrameId = window.requestAnimationFrame(renderLoop);
 
-  return stop;
+  return { stop, setViewMode };
 }
